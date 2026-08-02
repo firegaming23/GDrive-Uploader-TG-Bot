@@ -2,6 +2,7 @@ import re
 import time
 import json
 import asyncio
+from urllib.parse import urlencode
 from datetime import datetime, timedelta
 from httplib2 import Http
 from pyrogram import Client
@@ -11,8 +12,8 @@ from helpers import gDrive_sql as db
 from helpers import parent_id_sql as sql
 
 OAUTH_SCOPE = "https://www.googleapis.com/auth/drive"
-G_DRIVE_CLIENT_ID = "751038558683-qjamst56ahmeh68bbcr64tstpbkitvgd.apps.googleusercontent.com"
-G_DRIVE_CLIENT_SECRET = "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"
+G_DRIVE_CLIENT_ID = "197036948433-4sjgjrj1osm5b5neu8khh7c2nsvn96f7.apps.googleusercontent.com"
+G_DRIVE_CLIENT_SECRET = "dnXoMIu2V7HQ8G8RicrKmvlu"
 TOKEN_URI = "https://oauth2.googleapis.com/token"
 DEVICE_CODE_URI = "https://oauth2.googleapis.com/device/code"
 
@@ -38,17 +39,23 @@ async def _auth(client, message):
 
     try:
         http = Http()
-        body = f"client_id={G_DRIVE_CLIENT_ID}&scope={OAUTH_SCOPE}"
+        body = urlencode({
+            "client_id": G_DRIVE_CLIENT_ID,
+            "scope": OAUTH_SCOPE
+        })
         resp, content = http.request(
             DEVICE_CODE_URI,
             method="POST",
             body=body,
             headers={"Content-Type": "application/x-www-form-urlencoded"}
         )
-        data = json.loads(content)
+
+        content_str = content.decode() if isinstance(content, bytes) else content
+        data = json.loads(content_str)
 
         if resp.status != 200:
-            await message.reply_text(f"**ERROR:** ```{data.get('error_description', content)}```", quote=True)
+            error_msg = data.get("error_description") or data.get("error") or content_str
+            await message.reply_text(f"**ERROR:** ```{error_msg}```", quote=True)
             return
 
         device_code = data["device_code"]
@@ -75,7 +82,9 @@ async def _auth(client, message):
         asyncio.create_task(poll_for_token(client, message.from_user.id))
 
     except Exception as e:
-        await message.reply_text(f"**ERROR:** ```{e}```", quote=True)
+        import traceback
+        err_detail = traceback.format_exc()
+        await message.reply_text(f"**ERROR:** ```{err_detail[-200:]}```", quote=True)
 
 
 async def poll_for_token(client, user_id):
@@ -97,7 +106,8 @@ async def poll_for_token(client, user_id):
         except Exception:
             continue
 
-        data = json.loads(content)
+        content_str = content.decode() if isinstance(content, bytes) else content
+        data = json.loads(content_str)
 
         if resp.status == 200:
             access_token = data["access_token"]
@@ -137,7 +147,7 @@ async def poll_for_token(client, user_id):
                 user_auth_state.pop(user_id, None)
                 return
             else:
-                await client.send_message(user_id, f"**ERROR:** ```{content}```")
+                await client.send_message(user_id, f"**ERROR:** ```{content_str}```")
                 user_auth_state.pop(user_id, None)
                 return
 
@@ -147,12 +157,12 @@ async def poll_for_token(client, user_id):
 
 def _do_token_poll(device_code):
     http = Http()
-    body = (
-        f"client_id={G_DRIVE_CLIENT_ID}"
-        f"&client_secret={G_DRIVE_CLIENT_SECRET}"
-        f"&device_code={device_code}"
-        f"&grant_type=urn:ietf:params:oauth:grant-type:device_code"
-    )
+    body = urlencode({
+        "client_id": G_DRIVE_CLIENT_ID,
+        "client_secret": G_DRIVE_CLIENT_SECRET,
+        "device_code": device_code,
+        "grant_type": "urn:ietf:params:oauth:grant-type:device_code"
+    })
     resp, content = http.request(
         TOKEN_URI,
         method="POST",
