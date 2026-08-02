@@ -11,7 +11,7 @@ OAUTH_SCOPE = "https://www.googleapis.com/auth/drive"
 REDIRECT_URI = "http://localhost"
 G_DRIVE_DIR_MIME_TYPE = "application/vnd.google-apps.folder"
 G_DRIVE_CLIENT_ID = "751038558683-qjamst56ahmeh68bbcr64tstpbkitvgd.apps.googleusercontent.com"
-G_DRIVE_CLIENT_SECRET = "dnXoMIu2V7HQ8G8RicrKmvlu"
+G_DRIVE_CLIENT_SECRET = "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"
 
 user_flows = {}
 
