@@ -9,7 +9,7 @@ async def _start(client: Client, message: Message):
     """Handle /start command in private messages."""
     await message.reply_text(
         text=tr.START_MSG.format(message.from_user.first_name),
-        parse_mode=ParseMode.Markdown,
+        parse_mode=ParseMode.DEFAULT,
         disable_notification=True,
         reply_to_message_id=message.id
     )
@@ -20,7 +20,7 @@ async def _help(client: Client, message: Message):
     """Handle /help command in private messages."""
     await message.reply_text(
         text=tr.HELP_MSG[1],
-        parse_mode=ParseMode.Markdown,
+        parse_mode=ParseMode.DEFAULT,
         disable_notification=True,
         reply_markup=help_keyboard(1),
         reply_to_message_id=message.id
@@ -54,10 +54,10 @@ async def help_answer(client: Client, callback_query: CallbackQuery):
     """Handle help navigation via inline buttons."""
     try:
         pos = int(callback_query.data.split("+")[1])
-        await callback_query.answer()  # Remove the "loading" animation
+        await callback_query.answer()
         await callback_query.edit_message_text(
             text=tr.HELP_MSG[pos],
-            parse_mode=ParseMode.Markdown,
+            parse_mode=ParseMode.DEFAULT,
             reply_markup=help_keyboard(pos)
         )
     except (IndexError, ValueError, KeyError):
