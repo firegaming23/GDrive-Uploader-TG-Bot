@@ -1,19 +1,23 @@
 import re
+import time
+import json
+import asyncio
+from datetime import datetime, timedelta
 from httplib2 import Http
 from pyrogram import Client
-from pyrogram.filters import private, incoming, command, text
-from oauth2client.client import OAuth2WebServerFlow, FlowExchangeError
+from pyrogram.filters import private, incoming, command
+from oauth2client.client import OAuth2Credentials
 from helpers import gDrive_sql as db
 from helpers import parent_id_sql as sql
 
 OAUTH_SCOPE = "https://www.googleapis.com/auth/drive"
-REDIRECT_URI = "urn:ietf:wg:oauth:2.0:oob"
-G_DRIVE_DIR_MIME_TYPE = "application/vnd.google-apps.folder"
 G_DRIVE_CLIENT_ID = "197036948433-4sjgjrj1osm5b5neu8khh7c2nsvn96f7.apps.googleusercontent.com"
 G_DRIVE_CLIENT_SECRET = "dnXoMIu2V7HQ8G8RicrKmvlu"
+TOKEN_URI = "https://oauth2.googleapis.com/token"
+DEVICE_CODE_URI = "https://oauth2.googleapis.com/device/code"
 
-# Store per-user OAuth flows
-user_flows = {}
+user_auth_state = {}
+
 
 @Client.on_message(private & incoming & command(['auth']))
 async def _auth(client, message):
@@ -30,23 +34,133 @@ async def _auth(client, message):
             )
         except Exception as e:
             await message.reply_text(f"**ERROR (refresh):** ```{e}```", quote=True)
-    else:
+        return
+
+    try:
+        http = Http()
+        body = f"client_id={G_DRIVE_CLIENT_ID}&scope={OAUTH_SCOPE}"
+        resp, content = http.request(
+            DEVICE_CODE_URI,
+            method="POST",
+            body=body,
+            headers={"Content-Type": "application/x-www-form-urlencoded"}
+        )
+        data = json.loads(content)
+
+        if resp.status != 200:
+            await message.reply_text(f"**ERROR:** ```{data.get('error_description', content)}```", quote=True)
+            return
+
+        device_code = data["device_code"]
+        user_code = data["user_code"]
+        verification_url = data["verification_url"]
+        expires_in = data["expires_in"]
+        interval = data["interval"]
+
+        user_auth_state[message.from_user.id] = {
+            "device_code": device_code,
+            "interval": interval,
+            "expires_at": time.time() + expires_in
+        }
+
+        await client.send_message(
+            message.from_user.id,
+            f"⛓️ **Authorize your Google Drive account.**\n\n"
+            f"1. Visit: [{verification_url}]({verification_url})\n"
+            f"2. Enter this code: `{user_code}`\n"
+            f"3. Allow permissions\n\n"
+            f"__I'll automatically detect when you're done. No need to send anything back.__"
+        )
+
+        asyncio.create_task(poll_for_token(client, message.from_user.id))
+
+    except Exception as e:
+        await message.reply_text(f"**ERROR:** ```{e}```", quote=True)
+
+
+async def poll_for_token(client, user_id):
+    state = user_auth_state.get(user_id)
+    if not state:
+        return
+
+    device_code = state["device_code"]
+    interval = state["interval"]
+    expires_at = state["expires_at"]
+
+    while time.time() < expires_at:
+        await asyncio.sleep(interval)
+
         try:
-            flow = OAuth2WebServerFlow(
-                G_DRIVE_CLIENT_ID,
-                G_DRIVE_CLIENT_SECRET,
-                OAUTH_SCOPE,
-                redirect_uri=REDIRECT_URI
+            resp, content = await asyncio.get_event_loop().run_in_executor(
+                None, _do_token_poll, device_code
             )
-            auth_url = flow.step1_get_authorize_url()
-            user_flows[message.from_user.id] = flow
+        except Exception:
+            continue
+
+        data = json.loads(content)
+
+        if resp.status == 200:
+            access_token = data["access_token"]
+            refresh_token = data.get("refresh_token")
+            expires_in = data.get("expires_in", 3600)
+
+            creds = OAuth2Credentials(
+                access_token=access_token,
+                client_id=G_DRIVE_CLIENT_ID,
+                client_secret=G_DRIVE_CLIENT_SECRET,
+                refresh_token=refresh_token,
+                token_expiry=datetime.utcnow() + timedelta(seconds=expires_in),
+                token_uri=TOKEN_URI,
+                user_agent="GDrive-Uploader-TG-Bot/1.0"
+            )
+            db.set_credential(user_id, creds)
+            user_auth_state.pop(user_id, None)
+
             await client.send_message(
-                message.from_user.id,
-                f"⛓️ **To Authorize your Google Drive account visit this [URL]({auth_url}) and send the generated code here.**\n"
-                "__Visit the URL > Allow permissions > you will get a code. Send it here.__"
+                user_id,
+                "**Authorized Google Drive account Successfully.**"
             )
-        except Exception as e:
-            await message.reply_text(f"**ERROR:** ```{e}```", quote=True)
+            return
+        else:
+            error = data.get("error")
+            if error == "authorization_pending":
+                continue
+            elif error == "slow_down":
+                interval += 5
+                continue
+            elif error == "expired_token":
+                await client.send_message(user_id, "❗ **Authentication timed out.**\n__Run /auth again.__")
+                user_auth_state.pop(user_id, None)
+                return
+            elif error == "access_denied":
+                await client.send_message(user_id, "❗ **Authorization denied.**\n__Run /auth again if you change your mind.__")
+                user_auth_state.pop(user_id, None)
+                return
+            else:
+                await client.send_message(user_id, f"**ERROR:** ```{content}```")
+                user_auth_state.pop(user_id, None)
+                return
+
+    await client.send_message(user_id, "❗ **Authentication timed out.**\n__Run /auth again.__")
+    user_auth_state.pop(user_id, None)
+
+
+def _do_token_poll(device_code):
+    http = Http()
+    body = (
+        f"client_id={G_DRIVE_CLIENT_ID}"
+        f"&client_secret={G_DRIVE_CLIENT_SECRET}"
+        f"&device_code={device_code}"
+        f"&grant_type=urn:ietf:params:oauth:grant-type:device_code"
+    )
+    resp, content = http.request(
+        TOKEN_URI,
+        method="POST",
+        body=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded"}
+    )
+    return resp, content
+
 
 @Client.on_message(private & incoming & command(['revoke']))
 async def _revoke(client, message):
@@ -61,6 +175,7 @@ async def _revoke(client, message):
             await message.reply_text("🔓 **Authenticated Account revoked successfully.**", quote=True)
         except Exception as e:
             await message.reply_text(f"**ERROR:** ```{e}```", quote=True)
+
 
 @Client.on_message(private & incoming & command(['setfolder']))
 async def _set_parent(client, message):
@@ -101,34 +216,8 @@ async def _set_parent(client, message):
                 quote=True
             )
 
-@Client.on_message(private & incoming & text)
-async def _token(client, message):
-    token = message.text.strip()
-    if len(token) == 57 and token[1] == "/":
-        creds = None
-        flow = user_flows.get(message.from_user.id)
-        if flow is None:
-            await message.reply_text(
-                text="❗ **Invalid Code**\n__Run /auth first.__",
-                quote=True
-            )
-            return
-        try:
-            m = await message.reply_text(text="**Checking received code...**", quote=True)
-            creds = flow.step2_exchange(token)
-            db.set_credential(message.from_user.id, creds)
-            await m.edit('**Authorized Google Drive account Successfully.**')
-            user_flows.pop(message.from_user.id, None)  # Remove used flow
-        except FlowExchangeError:
-            await m.edit(
-                '❗ **Invalid Code**\n'
-                '__The code you have sent is invalid or already used before. Generate a new one by the Authorization URL.__'
-            )
-        except Exception as e:
-            await m.edit(f"**ERROR:** ```{e}```")
 
 def getIdFromUrl(link: str):
-    # Google Drive folder URL patterns
     found = re.search(
         r'https://drive\.google\.com/[\w\?\./&=]+([-\w]{33}|(?<=/)0A[-\w]{17})', link)
     if found:
