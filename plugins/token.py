@@ -12,8 +12,8 @@ from helpers import gDrive_sql as db
 from helpers import parent_id_sql as sql
 
 OAUTH_SCOPE = "https://www.googleapis.com/auth/drive"
-G_DRIVE_CLIENT_ID = "197036948433-4sjgjrj1osm5b5neu8khh7c2nsvn96f7.apps.googleusercontent.com"
-G_DRIVE_CLIENT_SECRET = "dnXoMIu2V7HQ8G8RicrKmvlu"
+G_DRIVE_CLIENT_ID = "751038558683-g53mnhf3l1cja2io3eaaebjm7mkv616c.apps.googleusercontent.com"
+G_DRIVE_CLIENT_SECRET = "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"
 TOKEN_URI = "https://oauth2.googleapis.com/token"
 DEVICE_CODE_URI = "https://oauth2.googleapis.com/device/code"
 
