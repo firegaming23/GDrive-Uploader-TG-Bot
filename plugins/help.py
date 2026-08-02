@@ -1,4 +1,5 @@
 from pyrogram import Client, filters
+from pyrogram.enums import ParseMode
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
 from config import Messages as tr
 
@@ -8,7 +9,7 @@ async def _start(client: Client, message: Message):
     """Handle /start command in private messages."""
     await message.reply_text(
         text=tr.START_MSG.format(message.from_user.first_name),
-        parse_mode="markdown",
+        parse_mode=ParseMode.Markdown,
         disable_notification=True,
         reply_to_message_id=message.id
     )
@@ -19,7 +20,7 @@ async def _help(client: Client, message: Message):
     """Handle /help command in private messages."""
     await message.reply_text(
         text=tr.HELP_MSG[1],
-        parse_mode="markdown",
+        parse_mode=ParseMode.Markdown,
         disable_notification=True,
         reply_markup=help_keyboard(1),
         reply_to_message_id=message.id
@@ -56,7 +57,7 @@ async def help_answer(client: Client, callback_query: CallbackQuery):
         await callback_query.answer()  # Remove the "loading" animation
         await callback_query.edit_message_text(
             text=tr.HELP_MSG[pos],
-            parse_mode="markdown",
+            parse_mode=ParseMode.Markdown,
             reply_markup=help_keyboard(pos)
         )
     except (IndexError, ValueError, KeyError):
